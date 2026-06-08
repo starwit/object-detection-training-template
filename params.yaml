@@ -1,0 +1,156 @@
+data:
+  # Stable dataset/project slug used by the DVC stages.
+  # Prepared data is written to datasets/<dataset_name>/.
+  # This is independent from the DVC experiment name (`dvc exp run -n ...`)
+  # and from any optional DVC remote.
+  dataset_name: example-object-detection
+  # Class resolution strategy
+  # -------------------------
+  # Choose exactly one strategy:
+  #
+  # 1. Custom classes:
+  #    - Set custom_classes to the raw class names your source labels can contain.
+  #    - Set use_coco_classes: false.
+  #    - If a raw source folder has a data.yaml with a names section, labels are
+  #      remapped by class name into this custom_classes order.
+  #    - If a raw source folder has no data.yaml, label IDs are assumed to already
+  #      be indexes into this custom_classes list.
+  #
+  # 2. COCO classes:
+  #    - Leave custom_classes empty.
+  #    - Set use_coco_classes: true.
+  #    - If a raw source folder has a data.yaml, labels are remapped by class name
+  #      into the trainer's COCO class order.
+  #    - If no data.yaml is present, label IDs must already use the trainer's COCO
+  #      class ID order.
+  #
+  # Raw source folders are read from raw_data/train/<source>/ and optionally
+  # raw_data/test/<source>/. Supported source layouts:
+  #
+  # - Manual YOLO layout:
+  #   raw_data/train/<source>/images/*
+  #   raw_data/train/<source>/labels/*.txt
+  #
+  # - CVAT/YOLO export layout:
+  #   raw_data/train/<source>/train.txt
+  #   raw_data/train/<source>/images/*
+  #   raw_data/train/<source>/labels/*.txt
+  #
+  # A source-level data.yaml is optional but recommended whenever the source
+  # label ID order may differ from this params.yaml. The trainer uses only its
+  # names section for raw-label remapping. The trainer writes its own prepared
+  # datasets/<dataset_name>/*/dataset.yaml later.
+  #
+  # Label files must use YOLO rows:
+  #   class_id x_center y_center width height
+  # Missing or empty label files are treated as valid background images.
+  custom_classes:
+    - object
+    - small_object
+    - large_object
+  use_coco_classes: false
+
+  # Optional output class mapping
+  # -----------------------------
+  # Use this to merge or rename raw classes after raw source IDs have been
+  # resolved as described above. This mapping is name-based and only applies
+  # when custom_classes is set.
+  #
+  # Format:
+  #   output_class: [raw_class_1, raw_class_2, ...]
+  #
+  # Example:
+  #   vehicle: [car, truck, bus]
+  #   person: [person]
+  #
+  # The final training/evaluation dataset.yaml will contain the output classes
+  # in the order first encountered while walking custom_classes. Raw classes not
+  # listed here keep their original names.
+  class_mapping:
+    object: [object]
+    small_object: [small_object]
+    large_object: [large_object]
+
+prepare:
+  val_split: 0.1
+  # Used only when raw_data/test is absent. If raw_data/test contains images,
+  # that explicit test folder is used and this split is ignored.
+  test_split: 0.1
+  augment_multiplier: 1
+  auto_replay:
+    enabled: false
+    max_new: 200
+    max_total: 400
+    iou_thr: 0.5
+    conf_thr: 0.25
+    border_conf: 0.35
+    include_empty: true
+    dest: raw_data/train/replay
+  # Optional per-source sampling. Keys must match folder names under
+  # raw_data/train/<source>/. Leave empty to use all images from every source.
+  # Example:
+  #   source_a: 1.0  # all images
+  #   source_b: 100  # at most 100 images
+  folder_subsets: {}
+
+train:
+  # Model key selected from models.<key>
+  model: yolo11m
+  # Shared defaults for all backends. Individual models can override these.
+  image_size: 640
+  epochs: 10
+  batch_size: 4
+  finetune:
+    enabled: false
+    weights: models/finetune/best.pt
+    lr: 0.0012
+    epochs: 30
+    freeze_backbone: true
+    optimizer: AdamW
+    mosaic: 0.15
+    close_mosaic: 5
+    mixup: 0.0
+    cos_lr: true
+    lrf: 0.05
+    patience: 20
+
+models_defaults:
+  yolo:
+    cache_dir: models/pretrained/yolo
+    allow_download: true
+  rtmdet:
+    cache_dir: models/pretrained/rtmdet
+    allow_download: true
+  rfdetr:
+    cache_dir: models/pretrained/rfdetr
+    allow_download: true
+    batch_size: 2
+    target_effective_batch: 16
+    lr: 0.0001
+    gradient_checkpointing: false
+
+models:
+  yolov8m:
+    backend: yolo
+    asset_id: yolov8m.pt
+
+  yolo11m:
+    backend: yolo
+    asset_id: yolo11m.pt
+
+  rtmdet-tiny:
+    backend: rtmdet
+    asset_id: rtmdet_tiny_8xb32-300e_coco
+
+  rfdetr-nano:
+    backend: rfdetr
+    variant: nano
+    asset_id: rf-detr-nano.pth
+    resolution: 640
+    epochs: 10
+
+evaluation:
+  # If this path has a real weights file and matching metadata, evaluation
+  # compares trained runs against it. If it is missing or empty, evaluation
+  # runs on the trained model only.
+  baseline_weights_path: models/current_best/best.pt

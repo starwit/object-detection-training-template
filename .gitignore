@@ -1,0 +1,42 @@
+.vscode/
+.gitignore_local
+.venv/
+
+# Python artifacts
+__pycache__/
+.pytest_cache/
+
+# Experiment outputs
+runs/
+results_comparison/
+metrics.json
+.tmp/
+.dvc_artifacts/
+
+# Downloaded pretrained assets and trained weights
+models/pretrained/
+models/finetune/*
+models/current_best/*
+!models/finetune/.gitkeep
+!models/current_best/.gitkeep
+*.pt
+*.pth
+*.torchscript
+*.onnx
+*.engine
+*.cache
+*_openvino_model/
+
+# Datasets and local media
+raw_data/*
+!raw_data/.gitkeep
+!raw_data/train/
+!raw_data/train/.gitkeep
+!raw_data/test/
+!raw_data/test/.gitkeep
+datasets/*
+*.zip
+*.mp4
+
+# Local scratch output
+*output*/

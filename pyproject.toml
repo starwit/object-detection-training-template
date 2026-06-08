@@ -1,0 +1,31 @@
+[tool.poetry]
+name = "object-detection-training-template"
+version = "0.1.0"
+description = "Template object detection training project built on object-detector-trainer"
+authors = ["edblu1"]
+readme = "README.md"
+package-mode = false
+
+[tool.poetry.dependencies]
+python = "^3.11"
+dvc = "^3.60.1"
+dvc-ssh = "^4.2.1"
+ruamel-yaml = "^0.18.14"
+pyyaml = "^6.0.2"
+object-detector-trainer = { git = "https://github.com/starwit/object-detector-trainer.git", tag = "v1.0.0", extras = ["rtmdet"] }
+
+
+[tool.poetry.group.dev.dependencies]
+pytest = "^8.2.0"
+
+[tool.pytest.ini_options]
+markers = [
+    "heavy: opt-in integration tests (slower and/or environment-sensitive; project heavy tests focus on DVC wiring and contracts)",
+]
+testpaths = ["tests"]
+norecursedirs = [".venv", "venv", "site-packages"]
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
