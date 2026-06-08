@@ -43,7 +43,7 @@ A DVC remote is required when the project should share versioned datasets, promo
 
 ## Creating A Project From This Template
 
-No bootstrap script is required for the minimal setup. Create a new repository from the template, then make the first project-specific edits before your first project-specific commit:
+Create a new repository from the template, then make the first project-specific edits before your first project-specific commit:
 
 1. Update `pyproject.toml`:
    - `tool.poetry.name`
