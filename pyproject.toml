@@ -3,6 +3,7 @@ name = "object-detection-training-template"
 version = "0.1.0"
 description = "Template object detection training project built on object-detector-trainer"
 authors = ["edblu1"]
+license = "AGPL-3.0-only"
 readme = "README.md"
 package-mode = false
 
