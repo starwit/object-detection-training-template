@@ -34,7 +34,8 @@ weights directly to Git. Use DVC for shared datasets and promoted baselines.
    poetry install
    ```
 
-5. Add data under `raw_data/`.
+5. Create `raw_data/` folders and add images/labels there. See
+   [Data Layout](#data-layout).
 6. Run an experiment:
 
    ```bash
@@ -46,6 +47,15 @@ commit the template files before the first `dvc exp run`. DVC experiments requir
 a Git repository with at least one commit.
 
 ## Data Layout
+
+Each new project creates `raw_data/` locally. The directory is Git-ignored so
+DVC can track it through `raw_data.dvc`:
+
+```bash
+mkdir -p raw_data/train/my-source/images raw_data/train/my-source/labels
+# Optional explicit test set:
+mkdir -p raw_data/test/my-test-source/images raw_data/test/my-test-source/labels
+```
 
 Use one or more source folders:
 
