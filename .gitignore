@@ -19,6 +19,9 @@ models/finetune/*
 models/current_best/*
 !models/finetune/.gitkeep
 !models/current_best/.gitkeep
+!models/current_best/*.dvc
+!models/current_best/metadata.yaml
+!models/current_best/model_config.py
 *.pt
 *.pth
 *.torchscript
@@ -28,12 +31,7 @@ models/current_best/*
 *_openvino_model/
 
 # Datasets and local media
-raw_data/*
-!raw_data/.gitkeep
-!raw_data/train/
-!raw_data/train/.gitkeep
-!raw_data/test/
-!raw_data/test/.gitkeep
+/raw_data
 datasets/*
 *.zip
 *.mp4
