@@ -11,9 +11,8 @@ package-mode = false
 python = "^3.11"
 dvc = "^3.60.1"
 dvc-ssh = "^4.2.1"
-ruamel-yaml = "^0.18.14"
 pyyaml = "^6.0.2"
-object-detector-trainer = { git = "https://github.com/starwit/object-detector-trainer.git", tag = "v1.0.0", extras = ["rtmdet"] }
+object-detector-trainer = { git = "https://github.com/starwit/object-detector-trainer.git", rev = "d977da66dd1d59e23e3888690eaea0e0388b75a5" }
 
 
 [tool.poetry.group.dev.dependencies]
@@ -21,7 +20,7 @@ pytest = "^8.2.0"
 
 [tool.pytest.ini_options]
 markers = [
-    "heavy: opt-in integration tests (slower and/or environment-sensitive; project heavy tests focus on DVC wiring and contracts)",
+    "heavy: real training through the DVC pipeline",
 ]
 testpaths = ["tests"]
 norecursedirs = [".venv", "venv", "site-packages"]

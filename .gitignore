@@ -8,10 +8,6 @@ __pycache__/
 
 # Experiment outputs
 runs/
-results_comparison/
-metrics.json
-.tmp/
-.dvc_artifacts/
 
 # Downloaded pretrained assets and trained weights
 models/pretrained/
@@ -21,7 +17,6 @@ models/current_best/*
 !models/current_best/.gitkeep
 !models/current_best/*.dvc
 !models/current_best/metadata.yaml
-!models/current_best/model_config.py
 *.pt
 *.pth
 *.torchscript

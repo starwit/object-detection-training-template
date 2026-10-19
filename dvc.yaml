@@ -1,106 +1,54 @@
-# dvc.yaml
+# Each stage calls the object-detector-trainer command line. The run folder
+# name is fixed ("current") so DVC can track its outputs; DVC experiments keep
+# the history of earlier runs.
 stages:
-  # Preflight: create placeholder files for optional direct DVC deps such as
-  # finetune/baseline paths so dependency checks stay deterministic on fresh clones.
-  check_optional_weight_deps:
-    cmd: python -m object_detector_trainer.pipeline.check_optional_weight_deps
-    deps:
-      - params.yaml
-      - pyproject.toml
-      - poetry.lock
-    outs:
-      - .tmp/dvc_bootstrap.txt
-    always_changed: true
-
-  # Bootstrap: provision the selected model assets and write a manifest that
-  # downstream stages depend on. Baseline weights remain an explicit `dvc pull`
-  # (evaluation will fail loudly if a promoted baseline is missing locally).
-  bootstrap_model_assets:
-    cmd: >
-      python -m train --stage bootstrap
-      --model ${train.model}
-    params:
-      - train.model
-      - models_defaults
-      - models
-    deps:
-      - train.py
-      - pyproject.toml
-      - poetry.lock
-      - .tmp/dvc_bootstrap.txt
-    outs:
-      - .tmp/bootstrap_manifest.json
-    always_changed: true
-
   prepare_data:
-    cmd: >
-      python -m train --stage prepare
-      --dataset-name ${data.dataset_name}
-      --val-split ${prepare.val_split}
-      --test-split ${prepare.test_split}
-      --augment-multiplier ${prepare.augment_multiplier}
-      --recreate-dataset
+    cmd: object-detector-trainer --stage prepare
     params:
+      - seed
       - data
       - prepare
     deps:
-      - train.py
-      - pyproject.toml
       - poetry.lock
       - raw_data/
     outs:
-      - datasets/${data.dataset_name}
+      # Rebuilt from raw_data/ and params.yaml; its images are hard links to
+      # raw_data/. Caching would replace them with copies, so DVC only tracks them.
+      - datasets/${data.dataset_name}:
+          cache: false
 
   train_model:
-    cmd: >
-      python -m train --stage train
-      --dataset-name ${data.dataset_name}
-      --model ${train.model}
-      --val-split ${prepare.val_split}
+    cmd: object-detector-trainer --stage train --run-name current
     params:
+      - seed
       - data
-      - prepare.val_split
-      - prepare.auto_replay
       - train
       - models_defaults
       - models
     deps:
-      - train.py
-      - pyproject.toml
       - poetry.lock
-      - .tmp/dvc_bootstrap.txt
-      - .tmp/bootstrap_manifest.json
       - datasets/${data.dataset_name}
-      # Optional direct dependency: placeholder created by the preflight stage.
-      - ${train.finetune.weights}
+      # Input for fine-tuning model entries (init_weights).
+      - models/finetune
     outs:
-      - .dvc_artifacts/train_runs
-      - .dvc_artifacts/last_train_result.json
+      - runs/current/train
 
   evaluate_model:
-    cmd: >
-      python -m train --stage evaluate
-      --dataset-name ${data.dataset_name}
-      --model ${train.model}
-      --val-split ${prepare.val_split}
+    cmd: object-detector-trainer --stage evaluate --run-name current
     params:
+      - seed
       - data
-      - prepare.val_split
-      - train.model
-      - evaluation.baseline_weights_path
-      - data.class_mapping
+      - evaluation
     deps:
-      - train.py
-      - pyproject.toml
       - poetry.lock
-      - .tmp/dvc_bootstrap.txt
-      - .tmp/bootstrap_manifest.json
-      - .dvc_artifacts/last_train_result.json
-      - .dvc_artifacts/train_runs
-      # Optional direct dependency: placeholder created by the preflight stage.
-      - ${evaluation.baseline_weights_path}
+      - datasets/${data.dataset_name}
+      - runs/current/train
+    # Evaluation runs on every experiment (a few minutes, never training), so a
+    # baseline that was exported or downloaded since the last run is always used.
+    # The baseline weights are deliberately not a dependency: DVC would then
+    # refuse to run in a clone where they are not downloaded.
+    always_changed: true
     outs:
-      - runs
-      - results_comparison/
+      - runs/current/eval
     metrics:
-      - metrics.json
+      - runs/current/metrics.json
