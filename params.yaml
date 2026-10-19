@@ -1,156 +1,88 @@
-data:
-  # Stable dataset/project slug used by the DVC stages.
-  # Prepared data is written to datasets/<dataset_name>/.
-  # This is independent from the DVC experiment name (`dvc exp run -n ...`)
-  # and from any optional DVC remote.
-  dataset_name: example-object-detection
-  # Class resolution strategy
-  # -------------------------
-  # Choose exactly one strategy:
-  #
-  # 1. Custom classes:
-  #    - Set custom_classes to the raw class names your source labels can contain.
-  #    - Set use_coco_classes: false.
-  #    - If a raw source folder has a data.yaml with a names section, labels are
-  #      remapped by class name into this custom_classes order.
-  #    - If a raw source folder has no data.yaml, label IDs are assumed to already
-  #      be indexes into this custom_classes list.
-  #
-  # 2. COCO classes:
-  #    - Leave custom_classes empty.
-  #    - Set use_coco_classes: true.
-  #    - If a raw source folder has a data.yaml, labels are remapped by class name
-  #      into the trainer's COCO class order.
-  #    - If no data.yaml is present, label IDs must already use the trainer's COCO
-  #      class ID order.
-  #
-  # Raw source folders are read from raw_data/train/<source>/ and optionally
-  # raw_data/test/<source>/. Supported source layouts:
-  #
-  # - Manual YOLO layout:
-  #   raw_data/train/<source>/images/*
-  #   raw_data/train/<source>/labels/*.txt
-  #
-  # - CVAT/YOLO export layout:
-  #   raw_data/train/<source>/train.txt
-  #   raw_data/train/<source>/images/*
-  #   raw_data/train/<source>/labels/*.txt
-  #
-  # A source-level data.yaml is optional but recommended whenever the source
-  # label ID order may differ from this params.yaml. The trainer uses only its
-  # names section for raw-label remapping. The trainer writes its own prepared
-  # datasets/<dataset_name>/*/dataset.yaml later.
-  #
-  # Label files must use YOLO rows:
-  #   class_id x_center y_center width height
-  # Missing or empty label files are treated as valid background images.
-  custom_classes:
-    - object
-    - small_object
-    - large_object
-  use_coco_classes: false
+# Settings for this project. See README.md, "Configure params.yaml"
+# and "Compare models and settings", for what to change here.
 
-  # Optional output class mapping
-  # -----------------------------
-  # Use this to merge or rename raw classes after raw source IDs have been
-  # resolved as described above. This mapping is name-based and only applies
-  # when custom_classes is set.
-  #
-  # Format:
-  #   output_class: [raw_class_1, raw_class_2, ...]
-  #
-  # Example:
-  #   vehicle: [car, truck, bus]
-  #   person: [person]
-  #
-  # The final training/evaluation dataset.yaml will contain the output classes
-  # in the order first encountered while walking custom_classes. Raw classes not
-  # listed here keep their original names.
-  class_mapping:
-    object: [object]
-    small_object: [small_object]
-    large_object: [large_object]
+seed: 42
+
+data:
+  # Name of the prepared dataset folder under datasets/.
+  dataset_name: my-dataset
+  # Your classes. For label files without a data.yaml, the order matters:
+  # class 0 in a label file is the first name here, class 1 the second, ...
+  custom_classes:
+  - object
+  class_mapping: {}  # Optional: train several classes as one, e.g. {vehicle: [car, truck]}
+  # Optional: classes in a source's data.yaml that you do not want to train;
+  # their boxes are left out, for example ignore_classes: [bottle]
+  ignore_classes: []
 
 prepare:
+  # Share of training data used to generate missing validation/test sets.
+  # Supplied sets from CVAT exports or outer folders take precedence.
   val_split: 0.1
-  # Used only when raw_data/test is absent. If raw_data/test contains images,
-  # that explicit test folder is used and this split is ignored.
   test_split: 0.1
-  augment_multiplier: 1
-  auto_replay:
-    enabled: false
-    max_new: 200
-    max_total: 400
-    iou_thr: 0.5
-    conf_thr: 0.25
-    border_conf: 0.35
-    include_empty: true
-    dest: raw_data/train/replay
-  # Optional per-source sampling. Keys must match folder names under
-  # raw_data/train/<source>/. Leave empty to use all images from every source.
-  # Example:
-  #   source_a: 1.0  # all images
-  #   source_b: 100  # at most 100 images
-  folder_subsets: {}
 
 train:
-  # Model key selected from models.<key>
-  model: yolo11m
-  # Shared defaults for all backends. Individual models can override these.
+  # Select a name from models below: yolo26n, yolo26m,
+  # rfdetr-nano, rfdetr-medium, or finetune (requires saved weights).
+  model: yolo26n
+  # Images are resized to this size (pixels). Larger finds smaller objects, but is slower.
   image_size: 640
-  epochs: 10
-  batch_size: 4
-  finetune:
-    enabled: false
-    weights: models/finetune/best.pt
-    lr: 0.0012
-    epochs: 30
-    freeze_backbone: true
-    optimizer: AdamW
-    mosaic: 0.15
-    close_mosaic: 5
-    mixup: 0.0
-    cos_lr: true
-    lrf: 0.05
-    patience: 20
+  # How often training goes through all training images.
+  epochs: 100
+  # auto: the first GPU if there is one, otherwise the CPU. Or cpu, cuda:0, cuda:1, ...
+  device: auto
 
 models_defaults:
+  # Applied to every model of a backend; values in models.<key> win.
   yolo:
     cache_dir: models/pretrained/yolo
-    allow_download: true
-  rtmdet:
-    cache_dir: models/pretrained/rtmdet
-    allow_download: true
   rfdetr:
     cache_dir: models/pretrained/rfdetr
-    allow_download: true
-    batch_size: 2
-    target_effective_batch: 16
-    lr: 0.0001
-    gradient_checkpointing: false
 
+# Each name directly below models is a value you can select with train.model.
 models:
-  yolov8m:
+  yolo26n:
     backend: yolo
-    asset_id: yolov8m.pt
+    asset_id: yolo26n.pt
+    batch_size: 8              # Images processed at once.
+    effective_batch_size: 64  # Optional accumulation target.
 
-  yolo11m:
+  yolo26m:
     backend: yolo
-    asset_id: yolo11m.pt
+    asset_id: yolo26m.pt
+    batch_size: 8              # Images processed at once.
+    effective_batch_size: 64  # Optional accumulation target.
 
-  rtmdet-tiny:
-    backend: rtmdet
-    asset_id: rtmdet_tiny_8xb32-300e_coco
+  # Fine-tune a trained model: copy its best.pt to models/finetune/best.pt.
+  finetune:
+    backend: yolo
+    asset_id: yolo26m.pt
+    batch_size: 8              # Images processed at once.
+    effective_batch_size: 64  # Optional accumulation target.
+    init_weights: models/finetune/best.pt
+    epochs: 30
+    freeze_backbone: true
+    extra_train_kwargs:
+      optimizer: AdamW   # So YOLO uses lr0 instead of choosing its own.
+      lr0: 0.0002        # About 1/8 of the normal learning rate.
+      warmup_epochs: 0   # No warm-up for an already trained model.
+      patience: 20
 
   rfdetr-nano:
     backend: rfdetr
     variant: nano
     asset_id: rf-detr-nano.pth
-    resolution: 640
-    epochs: 10
+    batch_size: 2              # Images processed at once.
+    effective_batch_size: 16  # Optional accumulation target.
+
+  rfdetr-medium:
+    backend: rfdetr
+    variant: medium
+    asset_id: rf-detr-medium.pth
+    batch_size: 2              # Images processed at once.
+    effective_batch_size: 16  # Optional accumulation target.
 
 evaluation:
-  # If this path has a real weights file and matching metadata, evaluation
-  # compares trained runs against it. If it is missing or empty, evaluation
-  # runs on the trained model only.
+  # Every run is compared against this model once it exists
+  # (tools/export_baseline.py puts it there). null: never compare.
   baseline_weights_path: models/current_best/best.pt

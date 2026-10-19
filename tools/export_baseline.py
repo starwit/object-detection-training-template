@@ -1,226 +1,74 @@
+"""Make a trained run the baseline that every new run is compared against.
+
+    python tools/export_baseline.py                              # runs/current/train
+    python tools/export_baseline.py --run-dir runs/my-run/train
+
+Copies the run's weights/best.pt and metadata.yaml to models/current_best/,
+tracks the weights with DVC and commits the baseline files in Git.
+"""
+
+from __future__ import annotations
+
 import argparse
 import shutil
+import subprocess
 import sys
 from pathlib import Path
 
 import yaml
 
-
-def _load_params() -> dict:
-    with open("params.yaml", "r", encoding="utf-8") as f:
-        return yaml.safe_load(f) or {}
+BASELINE_DIR = Path("models/current_best")
+COMMIT_MESSAGE = "Select new baseline"
 
 
-def _resolve_path(path_str: str | None) -> Path | None:
-    if not path_str:
-        return None
-    path = Path(path_str).expanduser()
-    if not path.is_absolute():
-        path = Path.cwd() / path
-    return path
+def export_baseline(run_dir: Path, baseline_dir: Path = BASELINE_DIR) -> None:
+    weights = run_dir / "weights" / "best.pt"
+    metadata = run_dir / "metadata.yaml"
+    for path in (weights, metadata):
+        if not path.is_file() or path.stat().st_size == 0:
+            raise FileNotFoundError(f"{path} is missing or empty. Is {run_dir} a finished training run?")
+    content = yaml.safe_load(metadata.read_text(encoding="utf-8"))
+    if not isinstance(content, dict) or not {"model_backend", "image_size"} <= content.keys():
+        raise ValueError(f"{metadata} is not a valid model metadata.yaml; the baseline was not changed.")
 
-
-def _default_baseline_path(params: dict) -> Path:
-    baseline_rel = params.get("evaluation", {}).get("baseline_weights_path")
-    baseline_path = _resolve_path(baseline_rel)
-    if baseline_path is None:
-        raise ValueError(
-            "Could not resolve evaluation.baseline_weights_path from params.yaml. "
-            "Pass --baseline-path explicitly or configure params.yaml."
-        )
-    return baseline_path
-
-
-def _determine_sources(args) -> tuple[Path, Path | None, Path | None]:
-    run_dir = _resolve_path(args.run_dir)
-    weights_path = _resolve_path(args.weights)
-    metadata_path = _resolve_path(args.metadata)
-
-    if run_dir is not None:
-        if weights_path is None:
-            weights_path = run_dir / "weights" / "best.pt"
-        if metadata_path is None:
-            metadata_path = run_dir / "metadata.yaml"
-
-    if weights_path is None:
-        raise ValueError("A weights file must be provided via --weights or --run-dir")
-    if metadata_path is None:
-        raise ValueError(
-            "A metadata file must be provided via --metadata or implied via --run-dir."
-        )
-
-    return weights_path, metadata_path, run_dir
-
-
-def _load_required_metadata(metadata_source: Path) -> dict:
-    if not metadata_source.exists():
-        raise FileNotFoundError(f"Metadata file not found: {metadata_source}")
-    with open(metadata_source, "r", encoding="utf-8") as f:
-        metadata = yaml.safe_load(f) or {}
-    if not isinstance(metadata, dict):
-        raise ValueError(f"Metadata file must contain a YAML mapping: {metadata_source}")
-    model_backend = str(metadata.get("model_backend", "")).strip()
-    if not model_backend:
-        raise ValueError(
-            f"Metadata file must define model_backend for exported baselines: {metadata_source}"
-        )
-    return metadata
-
-
-def _copy_rtmdet_baseline_config(
-    *,
-    metadata_to_write: dict,
-    metadata_source: Path | None,
-    run_dir: Path | None,
-    baseline_dir: Path,
-) -> None:
-    model_backend = str(metadata_to_write.get("model_backend", "")).strip().lower()
-    if model_backend not in {"rtmdet", "mmdet"}:
-        return
-
-    raw_config_path = str(metadata_to_write.get("model_config_path") or "").strip()
-    config_source: Path | None = None
-    if raw_config_path:
-        candidate = Path(raw_config_path).expanduser()
-        candidates: list[Path] = []
-        if candidate.is_absolute():
-            candidates.append(candidate)
-        else:
-            if metadata_source is not None:
-                candidates.append(metadata_source.parent / candidate)
-            candidates.append(Path.cwd() / candidate)
-        for resolved_candidate in candidates:
-            if resolved_candidate.exists():
-                config_source = resolved_candidate
-                break
-
-    if config_source is None:
-        run_config = run_dir / "model_config.py" if run_dir is not None else None
-        if run_config is not None and run_config.exists():
-            config_source = run_config
-        else:
-            raise FileNotFoundError(
-                "RTMDet baseline export requires a model_config.py artifact. "
-                "Pass --metadata pointing at a run metadata file that includes model_config_path, "
-                "or export directly from a run directory containing model_config.py."
-            )
-
-    baseline_config_path = baseline_dir / "model_config.py"
-    shutil.copy2(config_source, baseline_config_path)
-    metadata_to_write["model_config_path"] = baseline_config_path.name
-
-
-def export_baseline(args):
-    params = _load_params()
-
-    baseline_weights_target = _resolve_path(args.baseline_path) or _default_baseline_path(params)
-
-    weights_source, metadata_source, run_dir = _determine_sources(args)
-
-    if not weights_source.exists():
-        raise FileNotFoundError(f"Weights file not found: {weights_source}")
-
-    baseline_dir = baseline_weights_target.parent
     baseline_dir.mkdir(parents=True, exist_ok=True)
+    for source in (weights, metadata):
+        target = baseline_dir / source.name
+        # DVC may have checked the old file out as a read-only link: replace it, do not write into it.
+        target.unlink(missing_ok=True)
+        shutil.copy2(source, target)
 
-    print(f"Copying weights -> {baseline_weights_target}")
-    shutil.copy2(weights_source, baseline_weights_target)
 
-    metadata_to_write = _load_required_metadata(metadata_source)
+def record_baseline(baseline_dir: Path = BASELINE_DIR) -> bool:
+    """Track the weights with DVC and commit the baseline files. Returns False if nothing changed."""
+    run(sys.executable, "-m", "dvc", "add", str(baseline_dir / "best.pt"))
+    files = [str(baseline_dir / "best.pt.dvc"), str(baseline_dir / "metadata.yaml")]
+    run("git", "add", *files)
+    if subprocess.run(["git", "diff", "--cached", "--quiet", "--", *files]).returncode == 0:
+        return False
+    # Commit only these files, even if other changes are staged.
+    run("git", "commit", "-q", "-m", COMMIT_MESSAGE, "--", *files)
+    return True
 
-    # Enrich metadata with export info
-    # Convert absolute paths to relative paths starting with "runs/"
-    workspace_root = Path.cwd()
-    
-    if run_dir:
-        try:
-            run_dir_relative = run_dir.relative_to(workspace_root)
-            metadata_to_write.setdefault("source_run", str(run_dir_relative))
-        except ValueError:
-            # Fallback to absolute path if relative conversion fails
-            metadata_to_write.setdefault("source_run", str(run_dir))
+
+def run(*command: str) -> None:
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise SystemExit(f"{' '.join(command)} failed:\n{result.stdout}{result.stderr}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="Make a trained run the comparison baseline.")
+    parser.add_argument("--run-dir", type=Path, default=Path("runs/current/train"),
+                        help="Training run folder with weights/best.pt and metadata.yaml.")
+    args = parser.parse_args()
+    export_baseline(args.run_dir)
+    if record_baseline():
+        print(f'{args.run_dir} is the new baseline, committed as "{COMMIT_MESSAGE}".')
     else:
-        metadata_to_write.setdefault("source_run", str(weights_source.parent))
-    
-    try:
-        source_weights = str(weights_source.relative_to(workspace_root))
-    except ValueError:
-        # Fallback to absolute path if relative conversion fails
-        source_weights = str(weights_source)
-    metadata_to_write["source_weights"] = source_weights
-    
-    if args.tag:
-        metadata_to_write["tag"] = args.tag
-
-    baseline_metadata_path = baseline_dir / "metadata.yaml"
-
-    _copy_rtmdet_baseline_config(
-        metadata_to_write=metadata_to_write,
-        metadata_source=metadata_source,
-        run_dir=run_dir,
-        baseline_dir=baseline_dir,
-    )
-
-    with open(baseline_metadata_path, "w", encoding="utf-8") as f:
-        yaml.safe_dump(metadata_to_write, f, sort_keys=False)
-
-    print(f"Metadata written -> {baseline_metadata_path}")
-    return baseline_weights_target, baseline_metadata_path
-
-
-def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(
-        description="Export a trained run's best weights and metadata to the shared baseline location."
-    )
-    parser.add_argument(
-        "--run-dir",
-        type=str,
-        help="Path to a training run directory containing weights/best.pt and metadata.yaml",
-    )
-    parser.add_argument(
-        "--weights",
-        type=str,
-        help="Explicit path to the weights file to export (defaults to run-dir/weights/best.pt)",
-    )
-    parser.add_argument(
-        "--metadata",
-        type=str,
-        help="Explicit path to metadata yaml (defaults to run-dir/metadata.yaml)",
-    )
-    parser.add_argument(
-        "--baseline-path",
-        type=str,
-        help="Destination path for the baseline weights (defaults to params.yaml evaluation.baseline_weights_path)",
-    )
-    parser.add_argument(
-        "--tag",
-        type=str,
-        help="Optional label to store inside metadata.yaml (e.g., release name or git SHA)",
-    )
-    return parser
-
-
-def main(argv: list[str] | None = None) -> int:
-    parser = build_parser()
-    args = parser.parse_args(argv)
-    try:
-        baseline_weights_target, baseline_metadata_path = export_baseline(args)
-    except Exception as exc:
-        print(f"Error: {exc}")
-        return 1
-
-    baseline_dir = baseline_weights_target.parent
-    print("Baseline export complete.")
-    print("Next steps:")
-    print(f"  dvc add {baseline_weights_target}")
-    print("  dvc push")
-    print(f"  git add {baseline_weights_target.with_name(baseline_weights_target.name + '.dvc')}")
-    print(f"  git add {baseline_metadata_path}")
-    model_config_path = baseline_dir / "model_config.py"
-    if model_config_path.exists():
-        print(f"  git add {model_config_path}")
-    return 0
+        print(f"{args.run_dir} is already the baseline; nothing to commit.")
+    print("If shared storage is configured, upload it with: poetry run dvc push")
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    main()
